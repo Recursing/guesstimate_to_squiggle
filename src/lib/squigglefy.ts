@@ -2,7 +2,7 @@ import { identity, values } from "lodash";
 
 interface Metric {
   readonly id: string;
-  readonly name: string;
+  name: string;
 }
 
 interface Guesstimate {
@@ -13,7 +13,8 @@ interface Guesstimate {
     | "NORMAL"
     | "UNIFORM"
     | "POINT"
-    | "DATA";
+    | "DATA"
+    | "NONE"; // https://www.getguesstimate.com/models/9316
   expression: string | null;
   readonly description: string;
   readonly data?: readonly number[];
@@ -29,20 +30,7 @@ export interface GuesstimateData {
   };
 }
 
-interface NodeToCode {
-  POINT: (value: string) => string;
-  DATA: (value: readonly number[]) => string;
-  UNIFORM: (low: string, high: string) => string;
-  NORMAL: (low: string, high: string) => string;
-  LOGNORMAL: (low: string, high: string) => string;
-  FUNCTION: (value: string) => string;
-  assignment: (node: GraphNode) => string;
-}
-
-export function getCode(
-  data: GuesstimateData,
-  translation: NodeToCode
-): string {
+function getGraphNodes(data: GuesstimateData): Map<string, GraphNode> {
   const graph = data.graph;
 
   const metrics: readonly Metric[] = graph.metrics;
@@ -51,7 +39,6 @@ export function getCode(
   const metricsById = new Map<string, Metric>(metrics.map((m) => [m.id, m]));
 
   const graphNodes = new Map<string, GraphNode>();
-  const names = new Set<string>();
   guesstimates.map((g) => {
     const metric = metricsById.get(g.metric);
     if (!metric) {
@@ -62,6 +49,66 @@ export function getCode(
       ...g,
     };
     node.description = node.name as typeof node.description;
+    graphNodes.set(node.id, node);
+  });
+  return graphNodes;
+}
+
+export function getMermaidDag(data: GuesstimateData) {
+  const graphNodes = getGraphNodes(data);
+  const seen = new Set<string>();
+  const lines = [];
+  function nodeText(node: GraphNode) {
+    let name = node.name.replaceAll(/[^ a-zA-Z0-9,.\-$%]/g, "_");
+    if (name.length > 40) {
+      name = name.slice(0, 37) + "...";
+    }
+    if (!name) {
+      return "";
+    }
+    return `${node.id}[${name.replaceAll(/[^ a-zA-Z0-9,.\-$%]/g, "_")}]`;
+  }
+  graphNodes.forEach((node) => {
+    if (
+      node.guesstimateType !== "FUNCTION" &&
+      node.guesstimateType !== "NONE"
+    ) {
+      return;
+    }
+    let expression = (node.expression || "").slice(1);
+    graphNodes.forEach((otherNode) => {
+      const { id } = otherNode;
+      const regex = new RegExp(`\\$\\{metric:${id}\\}`, "g");
+      if (regex.test(expression)) {
+        if (!seen.has(id)) {
+          lines.push(nodeText(otherNode));
+          seen.add(id);
+        }
+        if (!seen.has(node.id)) {
+          lines.push(nodeText(node));
+          seen.add(node.id);
+        }
+        lines.push(`${id} --> ${node.id}`);
+      }
+    });
+  });
+  return `graph RL
+${lines.join("\n")}`;
+}
+
+interface NodeToCode {
+  POINT: (value: string) => string;
+  DATA: (value: readonly number[]) => string;
+  UNIFORM: (low: string, high: string) => string;
+  NORMAL: (low: string, high: string) => string;
+  LOGNORMAL: (low: string, high: string) => string;
+  FUNCTION: (value: string) => string;
+  assignment: (node: GraphNode) => string;
+}
+
+function normalizeNames(graphNodes: Map<string, GraphNode>): void {
+  const seenNames = new Set<string>();
+  graphNodes.forEach((node) => {
     let name = node.name
       .toLowerCase()
       .replaceAll("%", " perc ")
@@ -74,22 +121,30 @@ export function getCode(
     if (name[0] >= "0" && name[0] <= "9") {
       name = "_" + name;
     }
-    if (names.has(name)) {
+    if (seenNames.has(name)) {
       let counter = 2;
       name = name + "_" + counter;
-      while (names.has(name)) {
+      while (seenNames.has(name)) {
         name = name + "_" + counter;
         counter += 1;
       }
     }
     node.name = name;
-    names.add(node.name);
-    graphNodes.set(node.id, structuredClone(node));
+    seenNames.add(node.name);
   });
+}
 
+export function getCode(
+  data: GuesstimateData,
+  translation: NodeToCode
+): string {
+  const graphNodes = getGraphNodes(data);
+  normalizeNames(graphNodes);
   const dependencies = new Map<string, Set<string>>();
-
   graphNodes.forEach((node) => {
+    if (node.name === "field_reserves") {
+      debugger;
+    }
     dependencies.set(node.id, new Set());
     switch (node.guesstimateType) {
       case "POINT":
@@ -105,24 +160,25 @@ export function getCode(
       }
       case "NORMAL": {
         let values = /^\[(.*),(.*)\]$/.exec(node.expression || "");
-        values ||= /^(.*)to(.*)$/.exec(node.expression || "");
+        values ||= /^(.*)(?:to|:)(.*)$/.exec(node.expression || "");
         if (values)
           node.expression = translation.NORMAL(
-            values[1].trim(),
-            values[2].trim()
+            values[1].trim().replace("%", "/100"),
+            values[2].trim().replace("%", "/100")
           );
         break;
       }
       case "LOGNORMAL": {
         let values = /^\[(.*),(.*)\]$/.exec(node.expression || "");
-        values ||= /^(.*)to(.*)$/.exec(node.expression || "");
+        values ||= /^(.*)(?:to|:)(.*)$/.exec(node.expression || "");
         if (values)
           node.expression = translation.LOGNORMAL(
-            values[1].trim(),
-            values[2].trim()
+            values[1].trim().replace("%", "/100"),
+            values[2].trim().replace("%", "/100")
           );
         break;
       }
+      case "NONE":
       case "FUNCTION": {
         let expression = (node.expression || "").slice(1);
         graphNodes.forEach((otherNode) => {
@@ -186,15 +242,17 @@ function expandNum(text: string): string {
   return text
     .replace("K", " * 1_000")
     .replace("M", " * 1_000_000")
-    .replace("B", " * 1_000_000_000");
+    .replace("B", " * 1_000_000_000")
+    .replace("%", "/100");
 }
 
 const pythonReplacements = {
   "min(": "np.minimum(",
   "max(": "np.maximum(",
+  "^": "**",
 };
 const pythonCode: NodeToCode = {
-  POINT: identity,
+  POINT: expandNum,
   DATA: (data) => `np.array(${JSON.stringify(data)})`,
   UNIFORM: (low, high) => `make_uniform(${expandNum(low)}, ${expandNum(high)})`,
   NORMAL: (low, high) => `make_normal(${expandNum(low)}, ${expandNum(high)})`,

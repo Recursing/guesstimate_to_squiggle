@@ -3,11 +3,17 @@
     getSquiggleCode,
     getPythonCode,
     GuesstimateData,
+    getMermaidDag,
   } from "./lib/squigglefy";
   import PrismJs from "./lib/PrismJS.svelte";
   import PlaygroundLink from "./lib/PlaygroundLink.svelte";
+  import Mermaid from "./lib/Mermaid.svelte";
 
-  let code: Promise<{ squiggle: string; python: string }> | null = null;
+  let code: Promise<{
+    squiggle: string;
+    python: string;
+    mermaid: string;
+  }> | null = null;
   let guessTimateUrl = "";
 
   async function getGuesstimateData(
@@ -53,6 +59,7 @@
     return {
       squiggle: getSquiggleCode(guesstimateData),
       python: response.formatted_code,
+      mermaid: getMermaidDag(guesstimateData),
     };
   }
 
@@ -75,9 +82,10 @@
     {:then code}
       <h1>Python code:</h1>
       <a href="https://colab.research.google.com/#create=true">
-        Create new Google Colab notebook
+        Create new Colab notebook
       </a>
       <PrismJs code={code.python} language="python" />
+      <Mermaid code={code.mermaid} />
       <h1>Squiggle code:</h1>
       <PrismJs code={code.squiggle} language="javascript" />
       <PlaygroundLink code={code.squiggle} />

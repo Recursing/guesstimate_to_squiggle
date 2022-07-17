@@ -63,7 +63,7 @@
     };
   }
 
-  function handleClick() {
+  function handleSubmit() {
     code = getCode();
   }
 </script>
@@ -72,9 +72,12 @@
   <h1>Guesstimate to Python and Squiggle</h1>
   <input
     bind:value={guessTimateUrl}
+    on:keypress={(e) => {
+      if (e.key === "Enter") handleSubmit();
+    }}
     placeholder="https://www.getguesstimate.com/models/1234"
   />
-  <button on:click={handleClick}> Convert </button>
+  <button on:click={handleSubmit}> Convert </button>
 
   {#if code}
     {#await code}

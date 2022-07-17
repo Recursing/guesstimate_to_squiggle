@@ -1,12 +1,18 @@
 <script lang="ts">
-  import { getSquiggleCode } from "./lib/squigglefy";
+  import {
+    getSquiggleCode,
+    getPythonCode,
+    GuesstimateData,
+  } from "./lib/squigglefy";
   import PrismJs from "./lib/PrismJS.svelte";
   import PlaygroundLink from "./lib/PlaygroundLink.svelte";
 
-  let squiggleCode: Promise<string> | null = null;
+  let code: Promise<{ squiggle: string; python: string }> | null = null;
   let guessTimateUrl = "";
 
-  async function getGuesstimateData(guessTimateUrl: string) {
+  async function getGuesstimateData(
+    guessTimateUrl: string
+  ): Promise<GuesstimateData> {
     const pattern = /^https:\/\/www.getguesstimate.com\/models\/(\d+)$/;
 
     let matches = pattern.exec(guessTimateUrl.trim());
@@ -21,36 +27,60 @@
       },
     });
 
-    return await response.json();
+    return { ...(await response.json()), url: guessTimateUrl };
   }
 
-  async function squigglify() {
+  async function getCode() {
     const guesstimateData = await getGuesstimateData(guessTimateUrl);
     if (!guesstimateData) {
       throw Error("Error fetching guesstimate model: no data");
     }
-    return getSquiggleCode(guesstimateData);
+    const python = getPythonCode(guesstimateData);
+
+    // Format python code with black
+    const response = await fetch(
+      "https://1rctyledh3.execute-api.us-east-1.amazonaws.com/dev",
+      {
+        headers: {
+          accept: "*/*",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ source: python }),
+        method: "POST",
+        credentials: "omit",
+      }
+    ).then((response) => response.json());
+    return {
+      squiggle: getSquiggleCode(guesstimateData),
+      python: response.formatted_code,
+    };
   }
 
   function handleClick() {
-    squiggleCode = squigglify();
+    code = getCode();
   }
 </script>
 
 <main>
-  <h1>Guesstimate to Squiggle</h1>
+  <h1>Guesstimate to Python and Squiggle</h1>
   <input
     bind:value={guessTimateUrl}
     placeholder="https://www.getguesstimate.com/models/1234"
   />
-  <button on:click={handleClick}> Squigglify </button>
+  <button on:click={handleClick}> Convert </button>
 
-  {#if squiggleCode}
-    {#await squiggleCode}
+  {#if code}
+    {#await code}
       <p>Loading guesstimate model...</p>
     {:then code}
-      <PrismJs {code} />
-      <PlaygroundLink {code} />
+      <h1>Python code:</h1>
+      <a href="https://colab.research.google.com/#create=true">
+        Create new Google Colab notebook
+      </a>
+      <PrismJs code={code.python} language="python" />
+      <h1>Squiggle code:</h1>
+      <PrismJs code={code.squiggle} language="javascript" />
+      <PlaygroundLink code={code.squiggle} />
     {:catch error}
       <p style="color: red">
         {error.message}

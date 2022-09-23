@@ -39,7 +39,7 @@ function getGraphNodes(data: GuesstimateData): Map<string, GraphNode> {
   const metricsById = new Map<string, Metric>(metrics.map((m) => [m.id, m]));
 
   const graphNodes = new Map<string, GraphNode>();
-  guesstimates.map((g) => {
+  guesstimates.forEach((g) => {
     const metric = metricsById.get(g.metric);
     if (!metric) {
       throw Error("metric not found" + g.metric);
@@ -48,8 +48,8 @@ function getGraphNodes(data: GuesstimateData): Map<string, GraphNode> {
       ...metric,
       ...g,
     };
-    node.description = node.name as typeof node.description;
-    graphNodes.set(node.id, node);
+    node.description = node.name;
+    if (node.name) graphNodes.set(node.id, node);
   });
   return graphNodes;
 }

@@ -11,9 +11,7 @@
   });
   const compressed = deflate(text, { level: 9 });
   const hash = HASH_PREFIX + encodeURIComponent(fromByteArray(compressed));
-  const encodedUrl =
-    "https://deploy-preview-840--squiggle-documentation.netlify.app/playground" +
-    hash;
+  const encodedUrl = "https://www.squiggle-language.com/playground/" + hash;
 </script>
 
 <h2>
